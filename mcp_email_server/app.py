@@ -16,6 +16,7 @@ from mcp_email_server.emails.models import (
     EmailContentBatchResponse,
     EmailMetadataPageResponse,
 )
+from mcp_email_server.tools.create_draft_letter import create_cover_letter_draft as _create_draft
 
 mcp = FastMCP("email")
 
@@ -219,3 +220,31 @@ async def download_attachment(
 
     handler = dispatch_handler(account_name)
     return await handler.download_attachment(email_id, attachment_name, save_path, mailbox)
+
+
+@mcp.tool(
+    description="Create a cover letter draft from LaTeX template. Generates a PDF cover letter with personalized content."
+)
+async def create_cover_letter_draft(
+    employer_name: Annotated[str, Field(description="Name of the company/employer")],
+    position: Annotated[str, Field(description="Job position/title being applied for")],
+    language: Annotated[str, Field(description="Language: 'de' for German, 'en' for English")] = "de",
+    body1: Annotated[str, Field(description="First paragraph of the cover letter")] = "",
+    body2: Annotated[str, Field(description="Second paragraph of the cover letter")] = "",
+    body3: Annotated[str, Field(description="Third paragraph of the cover letter")] = "",
+    greeting: Annotated[
+        str | None, Field(description="Custom greeting (optional, defaults to standard greeting)")
+    ] = None,
+) -> str:
+    """Create a cover letter draft using LaTeX template."""
+    config = {"template_base": "D:/Nextcloud/sync/repo/job_applications/00_template"}
+    variables = {
+        "BODY1": body1,
+        "BODY2": body2,
+        "BODY3": body3,
+    }
+    if greeting:
+        variables["GREETING"] = greeting
+
+    result = _create_draft(config, employer_name, position, language, variables)
+    return result or "Failed to create cover letter draft"

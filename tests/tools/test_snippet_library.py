@@ -30,9 +30,9 @@ def test_snippet_library_loading():
         lib = SnippetLibrary(str(tmpdir_path))
         lib.load_snippets("de")
 
-        assert lib.get_snippet("de", "BODY1") == "Test Category: Test body text"
-        assert lib.get_snippet("de", "BODY2") == "Another Category: Another test paragraph"
-        assert lib.get_snippet("de", "BODY3") == ""  # Not defined
+        assert lib.get_snippet("de", "Test Category", "BODY1") == "Test Category: Test body text"
+        assert lib.get_snippet("de", "Another Category", "BODY2") == "Another Category: Another test paragraph"
+        assert lib.get_snippet("de", "Test Category", "BODY3") == ""  # Not defined
 
 
 def test_snippet_library_missing_file():
@@ -41,7 +41,7 @@ def test_snippet_library_missing_file():
         lib = SnippetLibrary(str(Path(tmpdir)))
         lib.load_snippets("de")
 
-        assert lib.get_snippet("de", "BODY1") == ""
+        assert lib.get_snippet("de", "ANY_CATEGORY", "BODY1") == ""
 
 
 def test_list_categories():
@@ -92,5 +92,5 @@ def test_get_all_snippets():
         lib = SnippetLibrary(str(tmpdir_path))
         lib.load_snippets("en")
 
-        assert lib.get_snippet("en", "BODY1") == "DevOps: DevOps text"
-        assert lib.get_snippet("en", "BODY2") == "AI: AI text"
+        assert lib.get_snippet("en", "DevOps", "BODY1") == "DevOps: DevOps text"
+        assert lib.get_snippet("en", "AI", "BODY2") == "AI: AI text"

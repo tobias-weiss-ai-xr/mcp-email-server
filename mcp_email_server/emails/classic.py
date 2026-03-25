@@ -1107,6 +1107,121 @@ class ClassicEmailHandler(EmailHandler):
             except Exception as e:
                 logger.error(f"Failed to save email to Sent folder: {e}", exc_info=True)
 
+    async def save_draft(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        attachments: list[str] | None = None,
+    ) -> str:
+        """Save an email as a draft in the Drafts folder.
+
+        Args:
+            to: Recipient email address.
+            subject: Email subject.
+            body: Email body content.
+            attachments: List of file paths to attach.
+
+        Returns:
+            Confirmation string with folder name and success status.
+
+        Raises:
+            FileNotFoundError: If no Drafts folder is found.
+            ValueError: If attachment path is invalid.
+        """
+        # Create message with or without attachments
+        if attachments:
+            msg = self.outgoing_client._create_message_with_attachments(body, False, attachments)
+        else:
+            msg = MIMEText(body, "plain", "utf-8")
+
+        # Handle subject with special characters
+        if any(ord(c) > 127 for c in subject):
+            msg["Subject"] = Header(subject, "utf-8")
+        else:
+            msg["Subject"] = subject
+
+        # Handle sender name with special characters
+        sender = f"{self.email_settings.full_name} <{self.email_settings.email_address}>"
+        if any(ord(c) > 127 for c in sender):
+            msg["From"] = Header(sender, "utf-8")
+        else:
+            msg["From"] = sender
+
+        msg["To"] = to
+
+        # Set Date header
+        msg["Date"] = email.utils.formatdate(localtime=True)
+
+        # Draft folder candidates
+        draft_folder_candidates = [
+            "Drafts",
+            "INBOX.Drafts",
+            "[Gmail]/Drafts",
+            "Entwürfe",
+        ]
+
+        # Establish IMAP connection
+        imap = self.incoming_client._imap_connect()
+
+        try:
+            await imap._client_task
+            await imap.wait_hello_from_server()
+            await imap.login(
+                self.email_settings.incoming.user_name,
+                self.email_settings.incoming.password,
+            )
+            await _send_imap_id(imap)
+
+            # Try to find and use the Drafts folder
+            for folder in draft_folder_candidates:
+                try:
+                    logger.debug(f"Trying Drafts folder: '{folder}'")
+                    # Try to select the folder to verify it exists
+                    result = await imap.select(_quote_mailbox(folder))
+                    logger.debug(f"Select result for '{folder}': {result}")
+
+                    # aioimaplib returns (status, data) where status is a string like 'OK' or 'NO'
+                    status = result[0] if isinstance(result, tuple) else result
+                    if str(status).upper() == "OK":
+                        # Folder exists, append the message with \Draft flag
+                        msg_bytes = msg.as_bytes()
+                        logger.debug(f"Appending draft to '{folder}'")
+                        # aioimaplib.append signature: (message_bytes, mailbox, flags, date)
+                        append_result = await imap.append(
+                            msg_bytes,
+                            mailbox=_quote_mailbox(folder),
+                            flags=r"(\Draft)",
+                        )
+                        logger.debug(f"Append result: {append_result}")
+                        append_status = append_result[0] if isinstance(append_result, tuple) else append_result
+                        if str(append_status).upper() == "OK":
+                            logger.info(f"Saved draft to '{folder}'")
+                            return f"Draft saved successfully to '{folder}'"
+                        else:
+                            logger.warning(f"Failed to append to '{folder}': {append_status}")
+                    else:
+                        logger.debug(f"Folder '{folder}' select returned: {status}")
+                except Exception as e:
+                    logger.debug(f"Folder '{folder}' not available: {e}")
+                    continue
+
+            # No Drafts folder found
+            error_msg = f"Could not find a valid Drafts folder. Tried: {draft_folder_candidates}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error saving draft: {e}")
+            raise
+        finally:
+            try:
+                await imap.logout()
+            except Exception as e:
+                logger.debug(f"Error during logout: {e}")
+
     async def delete_emails(self, email_ids: list[str], mailbox: str = "INBOX") -> tuple[list[str], list[str]]:
         """Delete emails by their UIDs. Returns (deleted_ids, failed_ids)."""
         return await self.incoming_client.delete_emails(email_ids, mailbox)

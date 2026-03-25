@@ -105,3 +105,27 @@ class EmailHandler(abc.ABC):
         Returns:
             AttachmentDownloadResponse with download result information.
         """
+
+    @abc.abstractmethod
+    async def save_draft(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        attachments: list[str] | None = None,
+    ) -> str:
+        """Save an email as a draft in the Drafts folder.
+
+        Args:
+            to: Recipient email address.
+            subject: Email subject.
+            body: Email body content.
+            attachments: List of file paths to attach.
+
+        Returns:
+            Confirmation string with folder name and success status.
+
+        Raises:
+            FileNotFoundError: If no Drafts folder is found.
+            ValueError: If attachment path is invalid.
+        """

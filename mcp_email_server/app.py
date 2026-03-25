@@ -228,6 +228,7 @@ async def download_attachment(
 async def create_cover_letter_draft(
     employer_name: Annotated[str, Field(description="Name of the company/employer")],
     position: Annotated[str, Field(description="Job position/title being applied for")],
+    employer_email: Annotated[str, Field(description="Email address of the employer/hiring contact")],
     language: Annotated[str, Field(description="Language: 'de' for German, 'en' for English")] = "de",
     body1: Annotated[str, Field(description="First paragraph of the cover letter")] = "",
     body2: Annotated[str, Field(description="Second paragraph of the cover letter")] = "",
@@ -247,4 +248,44 @@ async def create_cover_letter_draft(
         variables["GREETING"] = greeting
 
     result = _create_draft(config, employer_name, position, language, variables)
-    return result or "Failed to create cover letter draft"
+    if not result:
+        return "Failed to create cover letter draft"
+
+    # Parse PDF path from result (first line: "PDF created: /path/to/file.pdf")
+    pdf_path = result.split("\n")[0].replace("PDF created: ", "").strip()
+
+    # Build plain text body for email draft
+    if language.lower() == "de":
+        subject = f"Bewerbung als {position}"
+        default_greeting = "Sehr geehrte Damen und Herren,"
+    else:
+        subject = f"Application for {position}"
+        default_greeting = "Dear Hiring Manager,"
+
+    plain_text_body = f"{greeting or default_greeting}\n\n{body1}\n\n{body2}\n\n{body3}"
+
+    # Try to save as draft (graceful degradation if it fails)
+    try:
+        # Get the default email account for draft saving
+        from mcp_email_server.config import get_settings
+
+        settings = get_settings()
+        accounts = settings.get_accounts()
+        if accounts:
+            account_name = accounts[0].account_name
+            handler = dispatch_handler(account_name)
+
+            draft_result = await handler.save_draft(
+                to=employer_email,
+                subject=subject,
+                body=plain_text_body,
+                attachments=[pdf_path],
+            )
+            return f"{result}. {draft_result}"
+    except Exception as e:
+        from mcp_email_server.log import logger
+
+        logger.warning(f"Draft saving failed: {e}")
+        return f"{result}. Draft saving failed: {e}."
+
+    return result

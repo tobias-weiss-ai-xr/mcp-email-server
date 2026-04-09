@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import email.utils
 import mimetypes
 import re
@@ -156,6 +157,27 @@ class EmailClient:
             return self.imap_class(self.email_server.host, self.email_server.port, ssl_context=imap_ssl_context)
         return self.imap_class(self.email_server.host, self.email_server.port)
 
+    @contextlib.asynccontextmanager
+    async def _imap_session(self, mailbox: str = "INBOX"):
+        """Async context manager that handles IMAP connect, login, ID, select, and logout.
+
+        Yields a connected and authenticated IMAP client with the given mailbox selected.
+        Guarantees logout in the finally block.
+        """
+        imap = self._imap_connect()
+        try:
+            await imap._client_task
+            await imap.wait_hello_from_server()
+            await imap.login(self.email_server.user_name, self.email_server.password)
+            await _send_imap_id(imap)
+            await imap.select(_quote_mailbox(mailbox))
+            yield imap
+        finally:
+            try:
+                await imap.logout()
+            except Exception as e:
+                logger.debug(f"Error during logout: {e}")
+
     def _get_smtp_ssl_context(self) -> ssl.SSLContext | None:
         """Get SSL context for SMTP connections based on verify_ssl setting."""
         return _create_ssl_context(self.smtp_verify_ssl)
@@ -180,7 +202,7 @@ class EmailClient:
             if date_tuple:
                 return datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=timezone.utc)
             return datetime.now(timezone.utc)
-        except Exception:
+        except (ValueError, TypeError, OverflowError):
             return datetime.now(timezone.utc)
 
     def _parse_email_data(self, raw_email: bytes, email_id: str | None = None) -> dict[str, Any]:  # noqa: C901
@@ -356,7 +378,7 @@ class EmailClient:
                 "date": date,
                 "attachments": [],
             }
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
             logger.error(f"Error parsing email headers: {e!s}")
             return None
 
@@ -467,16 +489,7 @@ class EmailClient:
         flagged: bool | None = None,
         answered: bool | None = None,
     ) -> int:
-        imap = self._imap_connect()
-        try:
-            # Wait for the connection to be established
-            await imap._client_task
-            await imap.wait_hello_from_server()
-
-            # Login and select inbox
-            await imap.login(self.email_server.user_name, self.email_server.password)
-            await _send_imap_id(imap)
-            await imap.select(_quote_mailbox(mailbox))
+        async with self._imap_session(mailbox) as imap:
             search_criteria = self._build_search_criteria(
                 before,
                 since,
@@ -488,15 +501,8 @@ class EmailClient:
                 answered=answered,
             )
             logger.info(f"Count: Search criteria: {search_criteria}")
-            # Search for messages and count them - use UID SEARCH for consistency
             _, messages = await imap.uid_search(*search_criteria)
             return len(messages[0].split())
-        finally:
-            # Ensure we logout properly
-            try:
-                await imap.logout()
-            except Exception as e:
-                logger.info(f"Error during logout: {e}")
 
     async def get_emails_metadata_stream(
         self,
@@ -513,17 +519,7 @@ class EmailClient:
         flagged: bool | None = None,
         answered: bool | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        imap = self._imap_connect()
-        try:
-            # Wait for the connection to be established
-            await imap._client_task
-            await imap.wait_hello_from_server()
-
-            # Login and select mailbox
-            await imap.login(self.email_server.user_name, self.email_server.password)
-            await _send_imap_id(imap)
-            await imap.select(_quote_mailbox(mailbox))
-
+        async with self._imap_session(mailbox) as imap:
             search_criteria = self._build_search_criteria(
                 before,
                 since,
@@ -577,11 +573,6 @@ class EmailClient:
             for uid in page_uids:
                 if uid in metadata_by_uid:
                     yield metadata_by_uid[uid]
-        finally:
-            try:
-                await imap.logout()
-            except Exception as e:
-                logger.info(f"Error during logout: {e}")
 
     def _check_email_content(self, data: list) -> bool:
         """Check if the fetched data contains actual email content."""
@@ -627,17 +618,7 @@ class EmailClient:
         return None
 
     async def get_email_body_by_id(self, email_id: str, mailbox: str = "INBOX") -> dict[str, Any] | None:
-        imap = self._imap_connect()
-        try:
-            # Wait for the connection to be established
-            await imap._client_task
-            await imap.wait_hello_from_server()
-
-            # Login and select inbox
-            await imap.login(self.email_server.user_name, self.email_server.password)
-            await _send_imap_id(imap)
-            await imap.select(_quote_mailbox(mailbox))
-
+        async with self._imap_session(mailbox) as imap:
             # Fetch the specific email by UID
             data = await self._fetch_email_with_formats(imap, email_id)
             if not data:
@@ -657,13 +638,6 @@ class EmailClient:
                 logger.error(f"Error parsing email: {e!s}")
                 return None
 
-        finally:
-            # Ensure we logout properly
-            try:
-                await imap.logout()
-            except Exception as e:
-                logger.info(f"Error during logout: {e}")
-
     async def download_attachment(
         self,
         email_id: str,
@@ -682,15 +656,7 @@ class EmailClient:
         Returns:
             A dictionary with download result information.
         """
-        imap = self._imap_connect()
-        try:
-            await imap._client_task
-            await imap.wait_hello_from_server()
-
-            await imap.login(self.email_server.user_name, self.email_server.password)
-            await _send_imap_id(imap)
-            await imap.select(_quote_mailbox(mailbox))
-
+        async with self._imap_session(mailbox) as imap:
             data = await self._fetch_email_with_formats(imap, email_id)
             if not data:
                 msg = f"Failed to fetch email with UID {email_id}"
@@ -739,12 +705,6 @@ class EmailClient:
                 "size": len(attachment_data),
                 "saved_path": str(save_file.resolve()),
             }
-
-        finally:
-            try:
-                await imap.logout()
-            except Exception as e:
-                logger.info(f"Error during logout: {e}")
 
     def _validate_attachment(self, file_path: str) -> Path:
         """Validate attachment file path."""
@@ -959,17 +919,10 @@ class EmailClient:
 
     async def delete_emails(self, email_ids: list[str], mailbox: str = "INBOX") -> tuple[list[str], list[str]]:
         """Delete emails by their UIDs. Returns (deleted_ids, failed_ids)."""
-        imap = self._imap_connect()
         deleted_ids = []
         failed_ids = []
 
-        try:
-            await imap._client_task
-            await imap.wait_hello_from_server()
-            await imap.login(self.email_server.user_name, self.email_server.password)
-            await _send_imap_id(imap)
-            await imap.select(_quote_mailbox(mailbox))
-
+        async with self._imap_session(mailbox) as imap:
             for email_id in email_ids:
                 try:
                     await imap.uid("store", email_id, "+FLAGS", r"(\Deleted)")
@@ -979,11 +932,6 @@ class EmailClient:
                     failed_ids.append(email_id)
 
             await imap.expunge()
-        finally:
-            try:
-                await imap.logout()
-            except Exception as e:
-                logger.info(f"Error during logout: {e}")
 
         return deleted_ids, failed_ids
 

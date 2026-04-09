@@ -4,6 +4,60 @@ from mcp_email_server.config import EmailSettings, get_settings, store_settings
 from mcp_email_server.tools.installer import install_claude_desktop, is_installed, need_update, uninstall_claude_desktop
 
 
+def _claude_button_updates(status: str, is_inst: bool, needs_upd: bool) -> list:
+    """Build the standard 3-element return for Claude Desktop button state updates."""
+    button_text = "Update Claude Desktop" if (is_inst and needs_upd) else "Install to Claude Desktop"
+    button_interactive = not (is_inst and not needs_upd)
+    return [status, gr.update(value=button_text, interactive=button_interactive), gr.update(interactive=is_inst)]
+
+
+def _error_response(
+    error_msg: str,
+    account_md,
+    account_choices,
+    btn_visible,
+    account_name,
+    full_name,
+    email_address,
+    user_name,
+    password,
+    imap_host,
+    imap_port,
+    imap_ssl,
+    imap_user_name,
+    imap_password,
+    smtp_host,
+    smtp_port,
+    smtp_ssl,
+    smtp_start_ssl,
+    smtp_user_name,
+    smtp_password,
+):
+    """Build the standard 18-element return tuple for save_email_settings errors."""
+    return [
+        error_msg,
+        account_md,
+        account_choices,
+        btn_visible,
+        account_name,
+        full_name,
+        email_address,
+        user_name,
+        password,
+        imap_host,
+        imap_port,
+        imap_ssl,
+        imap_user_name,
+        imap_password,
+        smtp_host,
+        smtp_port,
+        smtp_ssl,
+        smtp_start_ssl,
+        smtp_user_name,
+        smtp_password,
+    ]
+
+
 def create_ui():  # noqa: C901
     # Create a Gradio interface
     with gr.Blocks(title="Email Settings Configuration") as app:
@@ -173,9 +227,8 @@ def create_ui():  # noqa: C901
                 try:
                     # Validate required fields
                     if not account_name or not full_name or not email_address or not user_name or not password:
-                        # Get account list update
                         account_md, account_choices, btn_visible = update_account_list()
-                        return (
+                        return _error_response(
                             "Error: Please fill in all required fields.",
                             account_md,
                             account_choices,
@@ -199,9 +252,8 @@ def create_ui():  # noqa: C901
                         )
 
                     if not imap_host or not smtp_host:
-                        # Get account list update
                         account_md, account_choices, btn_visible = update_account_list()
-                        return (
+                        return _error_response(
                             "Error: IMAP and SMTP hosts are required.",
                             account_md,
                             account_choices,
@@ -230,9 +282,8 @@ def create_ui():  # noqa: C901
                     # Check if account name already exists
                     for email in settings.emails:
                         if email.account_name == account_name:
-                            # Get account list update
                             account_md, account_choices, btn_visible = update_account_list()
-                            return (
+                            return _error_response(
                                 f"Error: Account name '{account_name}' already exists.",
                                 account_md,
                                 account_choices,
@@ -308,9 +359,8 @@ def create_ui():  # noqa: C901
                         "",  # Clear smtp_password
                     )
                 except Exception as e:
-                    # Get account list update
                     account_md, account_choices, btn_visible = update_account_list()
-                    return (
+                    return _error_response(
                         f"Error: {e!s}",
                         account_md,
                         account_choices,
@@ -405,18 +455,7 @@ def create_ui():  # noqa: C901
                 try:
                     install_claude_desktop()
                     status = update_claude_status()
-                    # Update button states based on new status
-                    is_inst = is_installed()
-                    needs_upd = need_update()
-
-                    button_text = "Update Claude Desktop" if (is_inst and needs_upd) else "Install to Claude Desktop"
-                    button_interactive = not (is_inst and not needs_upd)
-
-                    return [
-                        status,
-                        gr.update(value=button_text, interactive=button_interactive),
-                        gr.update(interactive=is_inst),
-                    ]
+                    return _claude_button_updates(status, is_installed(), need_update())
                 except Exception as e:
                     return [f"Error installing/updating Claude Desktop: {e!s}", gr.update(), gr.update()]
 
@@ -424,35 +463,14 @@ def create_ui():  # noqa: C901
                 try:
                     uninstall_claude_desktop()
                     status = update_claude_status()
-                    # Update button states based on new status
-                    is_inst = is_installed()
-                    needs_upd = need_update()
-
-                    button_text = "Update Claude Desktop" if (is_inst and needs_upd) else "Install to Claude Desktop"
-                    button_interactive = not (is_inst and not needs_upd)
-
-                    return [
-                        status,
-                        gr.update(value=button_text, interactive=button_interactive),
-                        gr.update(interactive=is_inst),
-                    ]
+                    return _claude_button_updates(status, is_installed(), need_update())
                 except Exception as e:
                     return [f"Error uninstalling from Claude Desktop: {e!s}", gr.update(), gr.update()]
 
             # Function to update button states based on installation status
             def update_button_states():
                 status = update_claude_status()
-                is_inst = is_installed()
-                needs_upd = need_update()
-
-                button_text = "Update Claude Desktop" if (is_inst and needs_upd) else "Install to Claude Desktop"
-                button_interactive = not (is_inst and not needs_upd)
-
-                return [
-                    status,
-                    gr.update(value=button_text, interactive=button_interactive),
-                    gr.update(interactive=is_inst),
-                ]
+                return _claude_button_updates(status, is_installed(), need_update())
 
             # Connect buttons to functions
             install_update_btn.click(

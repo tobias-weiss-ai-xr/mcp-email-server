@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -238,7 +239,13 @@ async def create_cover_letter_draft(
     ] = None,
 ) -> str:
     """Create a cover letter draft using LaTeX template."""
-    config = {"template_base": "D:/Nextcloud/sync/repo/job_applications/00_template"}
+    template_base = os.getenv(
+        "MCP_EMAIL_SERVER_TEMPLATE_BASE",
+        "",
+    )
+    if not template_base:
+        return "Error: Template base path not configured. Set MCP_EMAIL_SERVER_TEMPLATE_BASE environment variable."
+    config = {"template_base": template_base}
     variables = {
         "BODY1": body1,
         "BODY2": body2,

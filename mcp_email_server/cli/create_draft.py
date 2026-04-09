@@ -7,6 +7,7 @@ letter drafts using predefined LaTeX templates.
 
 from __future__ import annotations
 
+import os
 import sys
 
 import typer
@@ -42,7 +43,18 @@ def main(
         sys.exit(1)
 
     # Prepare configuration
-    config: dict = {"template_base": "D:/Nextcloud/sync/repo/job_applications/00_template"}
+    template_base = os.getenv(
+        "MCP_EMAIL_SERVER_TEMPLATE_BASE",
+        "",
+    )
+    if not template_base:
+        typer.echo(
+            "Error: Template base path not configured. Set MCP_EMAIL_SERVER_TEMPLATE_BASE environment variable.",
+            err=True,
+        )
+        sys.exit(1)
+
+    config: dict = {"template_base": template_base}
 
     # Prepare variables
     variables: dict = {

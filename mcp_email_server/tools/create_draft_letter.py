@@ -14,6 +14,45 @@ from typing import Any
 from mcp_email_server.log import logger
 
 
+def _run_latex_compilation(temp_file: Path, output_path: Path, pdf_path: Path) -> str | None:
+    """Run lualatex compilation and return PDF path on success, None on failure."""
+    logger.info(f"Compiling LaTeX: {temp_file.name} -> {pdf_path.name}")
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["lualatex", "-interaction=nonstopmode", "-output-directory", str(output_path), str(temp_file)],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"LaTeX compilation failed: {result.stderr}")
+            logger.debug(f"LaTeX stdout: {result.stdout}")
+            if temp_file.exists():
+                temp_file.unlink()
+            return None
+
+        if not pdf_path.exists():
+            logger.error(f"PDF not generated: {pdf_path}")
+            return None
+
+        logger.info(f"PDF generated successfully: {pdf_path}")
+        _clean_latex_aux_files(output_path, temp_file.stem)
+        return str(pdf_path)
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"LaTeX compilation timed out for {temp_file.name}")
+        return None
+    except FileNotFoundError:
+        logger.error("lualatex not found. Please install TeX Live or MiKTeX.")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error during compilation: {e}")
+        return None
+
+
 def compile_latex_letter(template_path: str, variables: dict[str, str], output_dir: str) -> str | None:
     """Compile a LaTeX template into a PDF with variable substitution.
 
@@ -80,46 +119,7 @@ def compile_latex_letter(template_path: str, variables: dict[str, str], output_d
 
     # Compile with lualatex
     pdf_path = output_path / template_file.with_suffix(".pdf").name
-    logger.info(f"Compiling LaTeX: {template_file.name} -> {pdf_path.name}")
-
-    try:
-        result = subprocess.run(
-            ["lualatex", "-interaction=nonstopmode", "-output-directory", str(output_path), str(temp_file)],
-            capture_output=True,
-            text=True,
-            timeout=120,  # 2 minutes timeout
-            check=False,
-        )
-
-        if result.returncode != 0:
-            logger.error(f"LaTeX compilation failed: {result.stderr}")
-            logger.debug(f"LaTeX stdout: {result.stdout}")
-            # Clean up temp file on failure
-            if temp_file.exists():
-                temp_file.unlink()
-            return None
-
-        # Check if PDF was generated
-        if not pdf_path.exists():
-            logger.error(f"PDF not generated: {pdf_path}")
-            return None
-
-        logger.info(f"PDF generated successfully: {pdf_path}")
-
-        # Clean up auxiliary files
-        _clean_latex_aux_files(output_path, template_file.stem)
-
-        return str(pdf_path)
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"LaTeX compilation timed out for {template_file.name}")
-        return None
-    except FileNotFoundError:
-        logger.error("lualatex not found. Please install TeX Live or MiKTeX.")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during compilation: {e}")
-        return None
+    return _run_latex_compilation(temp_file, output_path, pdf_path)
 
 
 def _escape_latex_special_chars(text: str) -> str:

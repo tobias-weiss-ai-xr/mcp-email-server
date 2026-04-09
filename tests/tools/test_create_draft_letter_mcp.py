@@ -1,4 +1,3 @@
-import pytest
 from mcp_email_server.app import mcp
 
 

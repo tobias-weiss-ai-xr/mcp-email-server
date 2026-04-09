@@ -1,8 +1,7 @@
 """Snippet library for reusable cover letter content."""
 
-from pathlib import Path
-from typing import Dict, List, Optional
 import re
+from pathlib import Path
 
 
 class SnippetLibrary:
@@ -15,7 +14,7 @@ class SnippetLibrary:
             base_path: Path to directory containing snippet files.
         """
         self.base_path = Path(base_path)
-        self._snippets: Dict[str, Dict[str, Dict[str, str]]] = {}
+        self._snippets: dict[str, dict[str, dict[str, str]]] = {}
 
     def load_snippets(self, language: str) -> None:
         """Load snippets for a specific language.
@@ -33,7 +32,7 @@ class SnippetLibrary:
         content = snippet_file.read_text(encoding="utf-8")
         self._snippets[language] = self._parse_snippets(content)
 
-    def _parse_snippets(self, content: str) -> Dict[str, Dict[str, str]]:
+    def _parse_snippets(self, content: str) -> dict[str, dict[str, str]]:
         """Parse markdown content into snippet dictionary.
 
         Args:
@@ -42,7 +41,7 @@ class SnippetLibrary:
         Returns:
             Dictionary mapping categories to variable names and snippet text.
         """
-        snippets: Dict[str, Dict[str, str]] = {}
+        snippets: dict[str, dict[str, str]] = {}
         sections = content.split("##")
 
         for section in sections[1:]:  # Skip first (title)
@@ -56,9 +55,7 @@ class SnippetLibrary:
 
             # Find variable assignment
             for line in content_lines:
-                match = re.match(
-                    r"\\(BODY[123])\s*:=\s*(.+)", line.strip(), re.IGNORECASE
-                )
+                match = re.match(r"\\(BODY[123])\s*:=\s*(.+)", line.strip(), re.IGNORECASE)
                 if match:
                     var_name, body_text = match.groups()
                     if category not in snippets:
@@ -86,7 +83,7 @@ class SnippetLibrary:
             return f"{category}: {snippets[category][var_name]}"
         return ""
 
-    def get_all_snippets_for_language(self, language: str) -> Dict[str, Dict[str, str]]:
+    def get_all_snippets_for_language(self, language: str) -> dict[str, dict[str, str]]:
         """Get all snippets for a language.
 
         Args:
@@ -100,7 +97,7 @@ class SnippetLibrary:
 
         return self._snippets.get(language, {})
 
-    def list_categories(self, language: str) -> List[str]:
+    def list_categories(self, language: str) -> list[str]:
         """List available categories for a language.
 
         Args:

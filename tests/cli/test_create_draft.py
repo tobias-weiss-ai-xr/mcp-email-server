@@ -1,6 +1,5 @@
 """Tests for CLI create_draft command."""
 
-
 from typer.testing import CliRunner
 
 from mcp_email_server.cli.create_draft import app

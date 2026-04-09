@@ -1,8 +1,7 @@
 """Tests for the SnippetLibrary module."""
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from mcp_email_server.tools.snippet_library import SnippetLibrary
 

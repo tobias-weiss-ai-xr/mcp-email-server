@@ -9,6 +9,7 @@ from jinja2 import Template
 
 _HERE = Path(__file__).parent
 CLAUDE_DESKTOP_CONFIG_TEMPLATE = _HERE / "claude_desktop_config.json"
+CLAUDE_SERVER_NAME = "zerolib-email"
 
 system = platform.system()
 if system == "Darwin":
@@ -86,8 +87,8 @@ def uninstall_claude_desktop() -> None:
     if "mcpServers" not in existing_config:
         return
 
-    if "zerolib-email" in existing_config["mcpServers"]:
-        del existing_config["mcpServers"]["zerolib-email"]
+    if CLAUDE_SERVER_NAME in existing_config["mcpServers"]:
+        del existing_config["mcpServers"][CLAUDE_SERVER_NAME]
 
     with open(CLAUDE_DESKTOP_CONFIG_PATH, "w") as f:
         json.dump(existing_config, f, indent=4)
@@ -107,7 +108,7 @@ def is_installed() -> bool:
         with open(CLAUDE_DESKTOP_CONFIG_PATH) as f:
             config = json.load(f)
 
-        return "mcpServers" in config and "zerolib-email" in config["mcpServers"]
+        return "mcpServers" in config and CLAUDE_SERVER_NAME in config["mcpServers"]
     except (FileNotFoundError, json.JSONDecodeError):
         return False
 
@@ -133,8 +134,8 @@ def need_update() -> bool:
             installed_config = json.load(f)
 
         # Compare the relevant parts of the configs
-        template_server = template_config["mcpServers"]["zerolib-email"]
-        installed_server = installed_config["mcpServers"]["zerolib-email"]
+        template_server = template_config["mcpServers"][CLAUDE_SERVER_NAME]
+        installed_server = installed_config["mcpServers"][CLAUDE_SERVER_NAME]
 
         # Check if any key configuration elements differ
         return (

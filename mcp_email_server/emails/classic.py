@@ -13,6 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.parser import BytesParser
 from email.policy import default
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,18 @@ from mcp_email_server.emails.models import (
 from mcp_email_server.log import logger
 
 # Maximum body length before truncation (characters)
-MAX_BODY_LENGTH = 20000
+_MAX_BODY_LENGTH = 20000
+
+
+def _get_version() -> str:
+    """Return the installed package version, or 'dev' if not installed."""
+    try:
+        return _pkg_version("mcp-email-server")
+    except Exception:
+        return "dev"
+
+
+_SERVER_VERSION = _get_version()
 
 
 def _quote_mailbox(mailbox: str) -> str:
@@ -65,7 +77,7 @@ async def _send_imap_id(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> None:
     See: https://github.com/ai-zerolab/mcp-email-server/issues/85
     """
     try:
-        response = await imap.id(name="mcp-email-server", version="1.0.0")
+        response = await imap.id(name="mcp-email-server", version=_SERVER_VERSION)
         if response.result != "OK":
             # Fallback for strict servers (e.g., 163.com)
             # Send raw command with correct parenthesis format
@@ -73,7 +85,7 @@ async def _send_imap_id(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> None:
                 aioimaplib.Command(
                     "ID",
                     imap.protocol.new_tag(),
-                    '("name" "mcp-email-server" "version" "1.0.0")',
+                    '("name" "mcp-email-server" "version" "{_SERVER_VERSION}")',
                 )
             )
     except Exception as e:
@@ -139,6 +151,24 @@ def _set_header(msg: MIMEText | MIMEMultipart, key: str, value: str) -> None:
         msg[key] = value
 
 
+def _strip_html(html: str) -> str:
+    """Simple HTML to text conversion."""
+    # Remove script and style elements
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    # Convert common block elements to newlines
+    text = re.sub(r"<(br|p|div|tr|li)[^>]*/?>", "\n", text, flags=re.IGNORECASE)
+    # Remove all remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode common HTML entities
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = text.replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'")
+    # Collapse multiple newlines and whitespace
+    text = re.sub(r"\n\s*\n", "\n\n", text)
+    text = re.sub(r" +", " ", text)
+    return text.strip()
+
+
 class EmailClient:
     def __init__(self, email_server: EmailServer, sender: str | None = None):
         self.email_server = email_server
@@ -159,11 +189,7 @@ class EmailClient:
 
     @contextlib.asynccontextmanager
     async def _imap_session(self, mailbox: str = "INBOX"):
-        """Async context manager that handles IMAP connect, login, ID, select, and logout.
-
-        Yields a connected and authenticated IMAP client with the given mailbox selected.
-        Guarantees logout in the finally block.
-        """
+        """Async context manager that handles IMAP connect, login, ID, select, and logout."""
         imap = self._imap_connect()
         try:
             await imap._client_task
@@ -205,94 +231,72 @@ class EmailClient:
         except (ValueError, TypeError, OverflowError):
             return datetime.now(timezone.utc)
 
-    def _parse_email_data(self, raw_email: bytes, email_id: str | None = None) -> dict[str, Any]:  # noqa: C901
+    @staticmethod
+    def _decode_part(part) -> str:
+        """Decode a MIME part payload into a string, handling charset detection."""
+        raw = part.get_payload(decode=True)
+        if not raw:
+            return ""
+        charset = part.get_content_charset("utf-8")
+        try:
+            return raw.decode(charset)
+        except UnicodeDecodeError:
+            return raw.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _extract_body_from_multipart(email_message) -> tuple[str, list[str]]:
+        """Extract body text and attachment filenames from a multipart email.
+
+        Returns (body, attachments) where body is plain text (or HTML-stripped fallback).
+        """
+        body = ""
+        html_body = ""
+        attachments = []
+
+        for part in email_message.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition", ""))
+
+            if "attachment" in content_disposition:
+                filename = part.get_filename()
+                if filename:
+                    attachments.append(filename)
+            elif content_type == "text/plain":
+                body += EmailClient._decode_part(part)
+            elif content_type == "text/html" and not body:
+                html_body += EmailClient._decode_part(part)
+
+        if not body and html_body:
+            body = _strip_html(html_body)
+
+        return body, attachments
+
+    def _parse_email_data(self, raw_email: bytes, email_id: str | None = None) -> dict[str, Any]:
         """Parse raw email data into a structured dictionary."""
         parser = BytesParser(policy=default)
         email_message = parser.parsebytes(raw_email)
 
-        # Extract email parts
         subject = email_message.get("Subject", "")
         sender = email_message.get("From", "")
         date_str = email_message.get("Date", "")
-
-        # Extract Message-ID for reply threading
         message_id = email_message.get("Message-ID")
-
-        # Extract recipients and parse date
         to_addresses = self._parse_recipients(email_message)
         date = self._parse_date(date_str)
 
-        # Get body content
-        body = ""
-        html_body = ""  # Fallback if no text/plain
-        attachments = []
-
-        def _strip_html(html: str) -> str:
-            """Simple HTML to text conversion."""
-            import re
-
-            # Remove script and style elements
-            text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
-            # Convert common block elements to newlines
-            text = re.sub(r"<(br|p|div|tr|li)[^>]*/?>", "\n", text, flags=re.IGNORECASE)
-            # Remove all remaining HTML tags
-            text = re.sub(r"<[^>]+>", "", text)
-            # Decode common HTML entities
-            text = text.replace("&nbsp;", " ").replace("&amp;", "&")
-            text = text.replace("&lt;", "<").replace("&gt;", ">")
-            text = text.replace("&quot;", '"').replace("&#39;", "'")
-            # Collapse multiple newlines and whitespace
-            text = re.sub(r"\n\s*\n", "\n\n", text)
-            text = re.sub(r" +", " ", text)
-            return text.strip()
-
         if email_message.is_multipart():
-            for part in email_message.walk():
-                content_type = part.get_content_type()
-                content_disposition = str(part.get("Content-Disposition", ""))
-
-                # Handle attachments
-                if "attachment" in content_disposition:
-                    filename = part.get_filename()
-                    if filename:
-                        attachments.append(filename)
-                # Handle text parts - prefer text/plain
-                elif content_type == "text/plain":
-                    body_part = part.get_payload(decode=True)
-                    if body_part:
-                        charset = part.get_content_charset("utf-8")
-                        try:
-                            body += body_part.decode(charset)
-                        except UnicodeDecodeError:
-                            body += body_part.decode("utf-8", errors="replace")
-                # Collect HTML as fallback
-                elif content_type == "text/html" and not body:
-                    html_part = part.get_payload(decode=True)
-                    if html_part:
-                        charset = part.get_content_charset("utf-8")
-                        try:
-                            html_body += html_part.decode(charset)
-                        except UnicodeDecodeError:
-                            html_body += html_part.decode("utf-8", errors="replace")
-
-            # Fall back to HTML if no plain text found
-            if not body and html_body:
-                body = _strip_html(html_body)
+            body, attachments = self._extract_body_from_multipart(email_message)
         else:
-            # Handle single-part emails
             content_type = email_message.get_content_type()
             payload = email_message.get_payload(decode=True)
+            body = ""
+            attachments = []
             if payload:
-                charset = email_message.get_content_charset("utf-8")
-                try:
-                    text = payload.decode(charset)
-                except UnicodeDecodeError:
-                    text = payload.decode("utf-8", errors="replace")
+                decoded = self._decode_part_from_bytes(payload, email_message)
+                body = _strip_html(decoded) if content_type == "text/html" else decoded
 
-                body = _strip_html(text) if content_type == "text/html" else text
         # TODO: Allow retrieving full email body
-        if body and len(body) > MAX_BODY_LENGTH:
-            body = body[:MAX_BODY_LENGTH] + "...[TRUNCATED]"
+        if body and len(body) > _MAX_BODY_LENGTH:
+            body = body[:_MAX_BODY_LENGTH] + "...[TRUNCATED]"
         return {
             "email_id": email_id or "",
             "message_id": message_id,
@@ -303,6 +307,15 @@ class EmailClient:
             "date": date,
             "attachments": attachments,
         }
+
+    @staticmethod
+    def _decode_part_from_bytes(raw: bytes, email_message) -> str:
+        """Decode raw bytes using the email message's charset."""
+        charset = email_message.get_content_charset("utf-8")
+        try:
+            return raw.decode(charset)
+        except UnicodeDecodeError:
+            return raw.decode("utf-8", errors="replace")
 
     @staticmethod
     def _sanitize_imap_value(value: str) -> str:
@@ -601,7 +614,9 @@ class EmailClient:
                 return bytes(item) if isinstance(item, bytearray) else item
         return None
 
-    async def _fetch_email_with_formats(self, imap, email_id: str) -> list | None:
+    async def _fetch_email_with_formats(
+        self, imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4, email_id: str
+    ) -> list | None:
         """Try different fetch formats to get email data."""
         fetch_formats = ["RFC822", "BODY[]", "BODY.PEEK[]", "(BODY.PEEK[])"]
 
@@ -768,7 +783,7 @@ class EmailClient:
         attachments: list[str] | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
-    ):
+    ) -> MIMEText | MIMEMultipart:
         # Create message with or without attachments
         if attachments:
             msg = self._create_message_with_attachments(body, html, attachments)

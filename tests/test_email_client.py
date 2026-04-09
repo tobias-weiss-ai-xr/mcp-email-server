@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mcp_email_server.config import EmailServer
-from mcp_email_server.emails.classic import EmailClient, _create_smtp_ssl_context
+from mcp_email_server.emails.classic import EmailClient, _create_ssl_context
 
 
 @pytest.fixture
@@ -506,12 +506,12 @@ class TestSmtpSslContext:
 
     def test_create_smtp_ssl_context_with_verification(self):
         """When verify_ssl=True, should return None (use default verification)."""
-        result = _create_smtp_ssl_context(verify_ssl=True)
+        result = _create_ssl_context(verify_ssl=True)
         assert result is None
 
     def test_create_smtp_ssl_context_without_verification(self):
         """When verify_ssl=False, should return permissive SSL context."""
-        result = _create_smtp_ssl_context(verify_ssl=False)
+        result = _create_ssl_context(verify_ssl=False)
 
         assert result is not None
         assert isinstance(result, ssl.SSLContext)

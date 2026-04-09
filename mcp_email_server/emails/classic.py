@@ -93,8 +93,49 @@ def _create_ssl_context(verify_ssl: bool) -> ssl.SSLContext | None:
     return ctx
 
 
-# Backwards-compatible alias
-_create_smtp_ssl_context = _create_ssl_context
+async def _try_append_to_folder(
+    imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4,
+    folder: str,
+    msg_bytes: bytes,
+    flags: str,
+) -> bool:
+    """Try to append a message to a specific IMAP folder.
+
+    Returns True if the folder exists and append succeeded, False otherwise.
+    """
+    try:
+        logger.debug(f"Trying folder: '{folder}'")
+        result = await imap.select(_quote_mailbox(folder))
+        logger.debug(f"Select result for '{folder}': {result}")
+
+        status = result[0] if isinstance(result, tuple) else result
+        if str(status).upper() != "OK":
+            logger.debug(f"Folder '{folder}' select returned: {status}")
+            return False
+
+        append_result = await imap.append(
+            msg_bytes,
+            mailbox=_quote_mailbox(folder),
+            flags=flags,
+        )
+        logger.debug(f"Append result: {append_result}")
+        append_status = append_result[0] if isinstance(append_result, tuple) else append_result
+        if str(append_status).upper() == "OK":
+            logger.info(f"Saved to '{folder}'")
+            return True
+
+        logger.warning(f"Failed to append to '{folder}': {append_status}")
+    except Exception as e:
+        logger.debug(f"Folder '{folder}' not available: {e}")
+    return False
+
+
+def _set_header(msg: MIMEText | MIMEMultipart, key: str, value: str) -> None:
+    """Set an email header, encoding as UTF-8 if it contains non-ASCII characters."""
+    if any(ord(c) > 127 for c in value):
+        msg[key] = Header(value, "utf-8")
+    else:
+        msg[key] = value
 
 
 class EmailClient:
@@ -775,17 +816,8 @@ class EmailClient:
             content_type = "html" if html else "plain"
             msg = MIMEText(body, content_type, "utf-8")
 
-        # Handle subject with special characters
-        if any(ord(c) > 127 for c in subject):
-            msg["Subject"] = Header(subject, "utf-8")
-        else:
-            msg["Subject"] = subject
-
-        # Handle sender name with special characters
-        if any(ord(c) > 127 for c in self.sender):
-            msg["From"] = Header(self.sender, "utf-8")
-        else:
-            msg["From"] = self.sender
+        _set_header(msg, "Subject", subject)
+        _set_header(msg, "From", self.sender)
 
         msg["To"] = ", ".join(recipients)
 
@@ -910,7 +942,7 @@ class EmailClient:
             # Try to find and use the Sent folder
             msg_bytes = msg.as_bytes()
             for folder in sent_folder_candidates:
-                if await self._try_append_to_folder(imap, folder, msg_bytes, r"(\Seen)"):
+                if await _try_append_to_folder(imap, folder, msg_bytes, r"(\Seen)"):
                     return True
 
             logger.warning("Could not find a valid Sent folder to save the message")
@@ -1080,37 +1112,6 @@ class ClassicEmailHandler(EmailHandler):
             except Exception as e:
                 logger.error(f"Failed to save email to Sent folder: {e}", exc_info=True)
 
-    async def _try_append_to_folder(self, imap, folder: str, msg_bytes: bytes, flags: str) -> bool:
-        """Try to append a message to a specific IMAP folder.
-
-        Returns True if the folder exists and append succeeded, False otherwise.
-        """
-        try:
-            logger.debug(f"Trying folder: '{folder}'")
-            result = await imap.select(_quote_mailbox(folder))
-            logger.debug(f"Select result for '{folder}': {result}")
-
-            status = result[0] if isinstance(result, tuple) else result
-            if str(status).upper() != "OK":
-                logger.debug(f"Folder '{folder}' select returned: {status}")
-                return False
-
-            append_result = await imap.append(
-                msg_bytes,
-                mailbox=_quote_mailbox(folder),
-                flags=flags,
-            )
-            logger.debug(f"Append result: {append_result}")
-            append_status = append_result[0] if isinstance(append_result, tuple) else append_result
-            if str(append_status).upper() == "OK":
-                logger.info(f"Saved to '{folder}'")
-                return True
-
-            logger.warning(f"Failed to append to '{folder}': {append_status}")
-        except Exception as e:
-            logger.debug(f"Folder '{folder}' not available: {e}")
-        return False
-
     async def save_draft(
         self,
         to: str,
@@ -1139,18 +1140,10 @@ class ClassicEmailHandler(EmailHandler):
         else:
             msg = MIMEText(body, "plain", "utf-8")
 
-        # Handle subject with special characters
-        if any(ord(c) > 127 for c in subject):
-            msg["Subject"] = Header(subject, "utf-8")
-        else:
-            msg["Subject"] = subject
+        _set_header(msg, "Subject", subject)
 
-        # Handle sender name with special characters
         sender = f"{self.email_settings.full_name} <{self.email_settings.email_address}>"
-        if any(ord(c) > 127 for c in sender):
-            msg["From"] = Header(sender, "utf-8")
-        else:
-            msg["From"] = sender
+        _set_header(msg, "From", sender)
 
         msg["To"] = to
 
@@ -1179,7 +1172,7 @@ class ClassicEmailHandler(EmailHandler):
 
             # Try to find and use the Drafts folder
             for folder in draft_folder_candidates:
-                if await self._try_append_to_folder(imap, folder, msg.as_bytes(), r"(\Draft)"):
+                if await _try_append_to_folder(imap, folder, msg.as_bytes(), r"(\Draft)"):
                     return f"Draft saved successfully to '{folder}'"
 
             # No Drafts folder found

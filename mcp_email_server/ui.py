@@ -30,15 +30,12 @@ def create_ui():  # noqa: C901
                         f"**Email Address:** {email.email_address}",
                     ]
 
-                    if hasattr(email, "description") and email.description:
+                    if email.description:
                         details.append(f"**Description:** {email.description}")
 
-                    # Add IMAP/SMTP provider info if available
-                    if hasattr(email, "incoming") and hasattr(email.incoming, "host"):
-                        details.append(f"**IMAP Provider:** {email.incoming.host}")
-
-                    if hasattr(email, "outgoing") and hasattr(email.outgoing, "host"):
-                        details.append(f"**SMTP Provider:** {email.outgoing.host}")
+                    # Add IMAP/SMTP provider info
+                    details.append(f"**IMAP Provider:** {email.incoming.host}")
+                    details.append(f"**SMTP Provider:** {email.outgoing.host}")
 
                     accounts_details.append("### " + email.account_name + "\n" + "\n".join(details) + "\n")
 

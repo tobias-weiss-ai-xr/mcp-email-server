@@ -17,6 +17,7 @@ from mcp_email_server.emails.models import (
     EmailContentBatchResponse,
     EmailMetadataPageResponse,
 )
+from mcp_email_server.log import logger
 from mcp_email_server.tools.create_draft_letter import create_cover_letter_draft as _create_draft
 
 mcp = FastMCP("email")
@@ -274,8 +275,6 @@ async def create_cover_letter_draft(
     # Try to save as draft (graceful degradation if it fails)
     try:
         # Get the default email account for draft saving
-        from mcp_email_server.config import get_settings
-
         settings = get_settings()
         accounts = settings.get_accounts()
         if accounts:
@@ -290,8 +289,6 @@ async def create_cover_letter_draft(
             )
             return f"{result}. {draft_result}"
     except Exception as e:
-        from mcp_email_server.log import logger
-
         logger.warning(f"Draft saving failed: {e}")
         return f"{result}. Draft saving failed: {e}."
 

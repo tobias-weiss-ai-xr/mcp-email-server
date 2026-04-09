@@ -9,7 +9,7 @@ app = typer.Typer()
 
 
 @app.command()
-def stdio():
+def stdio() -> None:
     mcp.run(transport="stdio")
 
 
@@ -17,7 +17,7 @@ def stdio():
 def sse(
     host: str = "localhost",
     port: int = 9557,
-):
+) -> None:
     mcp.settings.host = host
     mcp.settings.port = port
     mcp.run(transport="sse")
@@ -27,21 +27,21 @@ def sse(
 def streamable_http(
     host: str = os.environ.get("MCP_HOST", "localhost"),
     port: int = os.environ.get("MCP_PORT", 9557),
-):
+) -> None:
     mcp.settings.host = host
     mcp.settings.port = port
     mcp.run(transport="streamable-http")
 
 
 @app.command()
-def ui():
+def ui() -> None:
     from mcp_email_server.ui import main as ui_main
 
     ui_main()
 
 
 @app.command()
-def reset():
+def reset() -> None:
     delete_settings()
     typer.echo("✅ Config reset")
 

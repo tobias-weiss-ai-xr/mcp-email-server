@@ -48,7 +48,7 @@ def get_endpoint_path() -> str:
     return "mcp-email-server"
 
 
-def install_claude_desktop():
+def install_claude_desktop() -> None:
     # Read the template config
     template_content = CLAUDE_DESKTOP_CONFIG_TEMPLATE.read_text()
     rendered_content = Template(template_content).render(ENTRYPOINT=get_endpoint_path())
@@ -74,7 +74,7 @@ def install_claude_desktop():
         json.dump(existing_config, f, indent=4)
 
 
-def uninstall_claude_desktop():
+def uninstall_claude_desktop() -> None:
     if not CLAUDE_DESKTOP_CONFIG_PATH:
         raise NotImplementedError
     try:

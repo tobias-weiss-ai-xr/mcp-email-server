@@ -1,15 +1,21 @@
 """Tests for CLI create_draft command."""
 
+import os
+import tempfile
+
 from typer.testing import CliRunner
 
 from mcp_email_server.cli.create_draft import app
 
 runner = CliRunner()
 
+# Shared fake template base path for tests that don't exercise LaTeX compilation
+_FAKE_TEMPLATE_BASE = tempfile.mkdtemp()
+
 
 def test_create_draft_missing_required_args():
     """Test that CLI fails when required arguments are missing."""
-    result = runner.invoke(app, [])
+    result = runner.invoke(app, [], env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": _FAKE_TEMPLATE_BASE})
 
     assert result.exit_code != 0
     # Typer outputs to stderr when args are missing
@@ -21,6 +27,7 @@ def test_create_draft_invalid_language():
     result = runner.invoke(
         app,
         ["--employer", "Test Company", "--position", "DevOps", "--language", "fr"],
+        env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": "_FAKE_TEMPLATE_BASE"},
     )
 
     assert result.exit_code != 0
@@ -50,6 +57,7 @@ def test_create_draft_basic_execution(monkeypatch):
             "--language",
             "de",
         ],
+        env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": "_FAKE_TEMPLATE_BASE"},
     )
 
     assert result.exit_code == 0
@@ -90,6 +98,7 @@ def test_create_draft_with_all_options(monkeypatch):
             "--greeting",
             "Dear Hiring Manager,",
         ],
+        env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": "_FAKE_TEMPLATE_BASE"},
     )
 
     assert result.exit_code == 0
@@ -119,6 +128,7 @@ def test_create_draft_failure_case(monkeypatch):
     result = runner.invoke(
         app,
         ["--employer", "Test Company", "--position", "DevOps"],
+        env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": "_FAKE_TEMPLATE_BASE"},
     )
 
     assert result.exit_code != 0
@@ -147,6 +157,7 @@ def test_create_draft_english_language(monkeypatch):
             "--language",
             "en",
         ],
+        env={**os.environ, "MCP_EMAIL_SERVER_TEMPLATE_BASE": "_FAKE_TEMPLATE_BASE"},
     )
 
     assert result.exit_code == 0

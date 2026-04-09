@@ -1,13 +1,12 @@
 """Tests for the save_draft feature."""
 
 import asyncio
-from email.mime.text import MIMEText
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mcp_email_server.config import EmailServer, EmailSettings
-from mcp_email_server.emails.classic import ClassicEmailHandler, EmailClient
+from mcp_email_server.emails.classic import ClassicEmailHandler
 
 
 @pytest.fixture

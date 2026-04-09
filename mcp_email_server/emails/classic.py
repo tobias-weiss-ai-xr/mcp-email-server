@@ -908,37 +908,10 @@ class EmailClient:
                 sent_folder_candidates.insert(0, flag_folder)
 
             # Try to find and use the Sent folder
+            msg_bytes = msg.as_bytes()
             for folder in sent_folder_candidates:
-                try:
-                    logger.debug(f"Trying Sent folder: '{folder}'")
-                    # Try to select the folder to verify it exists
-                    result = await imap.select(_quote_mailbox(folder))
-                    logger.debug(f"Select result for '{folder}': {result}")
-
-                    # aioimaplib returns (status, data) where status is a string like 'OK' or 'NO'
-                    status = result[0] if isinstance(result, tuple) else result
-                    if str(status).upper() == "OK":
-                        # Folder exists, append the message
-                        msg_bytes = msg.as_bytes()
-                        logger.debug(f"Appending message to '{folder}'")
-                        # aioimaplib.append signature: (message_bytes, mailbox, flags, date)
-                        append_result = await imap.append(
-                            msg_bytes,
-                            mailbox=_quote_mailbox(folder),
-                            flags=r"(\Seen)",
-                        )
-                        logger.debug(f"Append result: {append_result}")
-                        append_status = append_result[0] if isinstance(append_result, tuple) else append_result
-                        if str(append_status).upper() == "OK":
-                            logger.info(f"Saved sent email to '{folder}'")
-                            return True
-                        else:
-                            logger.warning(f"Failed to append to '{folder}': {append_status}")
-                    else:
-                        logger.debug(f"Folder '{folder}' select returned: {status}")
-                except Exception as e:
-                    logger.debug(f"Folder '{folder}' not available: {e}")
-                    continue
+                if await self._try_append_to_folder(imap, folder, msg_bytes, r"(\Seen)"):
+                    return True
 
             logger.warning("Could not find a valid Sent folder to save the message")
             return False
@@ -1107,6 +1080,37 @@ class ClassicEmailHandler(EmailHandler):
             except Exception as e:
                 logger.error(f"Failed to save email to Sent folder: {e}", exc_info=True)
 
+    async def _try_append_to_folder(self, imap, folder: str, msg_bytes: bytes, flags: str) -> bool:
+        """Try to append a message to a specific IMAP folder.
+
+        Returns True if the folder exists and append succeeded, False otherwise.
+        """
+        try:
+            logger.debug(f"Trying folder: '{folder}'")
+            result = await imap.select(_quote_mailbox(folder))
+            logger.debug(f"Select result for '{folder}': {result}")
+
+            status = result[0] if isinstance(result, tuple) else result
+            if str(status).upper() != "OK":
+                logger.debug(f"Folder '{folder}' select returned: {status}")
+                return False
+
+            append_result = await imap.append(
+                msg_bytes,
+                mailbox=_quote_mailbox(folder),
+                flags=flags,
+            )
+            logger.debug(f"Append result: {append_result}")
+            append_status = append_result[0] if isinstance(append_result, tuple) else append_result
+            if str(append_status).upper() == "OK":
+                logger.info(f"Saved to '{folder}'")
+                return True
+
+            logger.warning(f"Failed to append to '{folder}': {append_status}")
+        except Exception as e:
+            logger.debug(f"Folder '{folder}' not available: {e}")
+        return False
+
     async def save_draft(
         self,
         to: str,
@@ -1175,41 +1179,12 @@ class ClassicEmailHandler(EmailHandler):
 
             # Try to find and use the Drafts folder
             for folder in draft_folder_candidates:
-                try:
-                    logger.debug(f"Trying Drafts folder: '{folder}'")
-                    # Try to select the folder to verify it exists
-                    result = await imap.select(_quote_mailbox(folder))
-                    logger.debug(f"Select result for '{folder}': {result}")
-
-                    # aioimaplib returns (status, data) where status is a string like 'OK' or 'NO'
-                    status = result[0] if isinstance(result, tuple) else result
-                    if str(status).upper() == "OK":
-                        # Folder exists, append the message with \Draft flag
-                        msg_bytes = msg.as_bytes()
-                        logger.debug(f"Appending draft to '{folder}'")
-                        # aioimaplib.append signature: (message_bytes, mailbox, flags, date)
-                        append_result = await imap.append(
-                            msg_bytes,
-                            mailbox=_quote_mailbox(folder),
-                            flags=r"(\Draft)",
-                        )
-                        logger.debug(f"Append result: {append_result}")
-                        append_status = append_result[0] if isinstance(append_result, tuple) else append_result
-                        if str(append_status).upper() == "OK":
-                            logger.info(f"Saved draft to '{folder}'")
-                            return f"Draft saved successfully to '{folder}'"
-                        else:
-                            logger.warning(f"Failed to append to '{folder}': {append_status}")
-                    else:
-                        logger.debug(f"Folder '{folder}' select returned: {status}")
-                except Exception as e:
-                    logger.debug(f"Folder '{folder}' not available: {e}")
-                    continue
+                if await self._try_append_to_folder(imap, folder, msg.as_bytes(), r"(\Draft)"):
+                    return f"Draft saved successfully to '{folder}'"
 
             # No Drafts folder found
             error_msg = f"Could not find a valid Drafts folder. Tried: {draft_folder_candidates}"
-            logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+            raise FileNotFoundError(error_msg)  # noqa: TRY301
 
         except FileNotFoundError:
             raise

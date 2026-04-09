@@ -1,9 +1,7 @@
 """End-to-end tests for complete cover letter workflow."""
 
-from pathlib import Path
-import tempfile
 import time
-import pytest
+from pathlib import Path
 
 from mcp_email_server.tools.create_draft_letter import create_cover_letter_draft
 

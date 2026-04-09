@@ -143,7 +143,7 @@ class TestCreateCoverLetterDraft:
     def test_create_cover_letter_draft_missing_template(self):
         """Test error handling when template files are missing."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = {"template_base": str(tmpdir_path := Path(tmpdir))}
+            config = {"template_base": tmpdir}
 
             result = create_cover_letter_draft(
                 config=config,
@@ -163,7 +163,7 @@ class TestLatexCompilation:
         # Check if lualatex is installed
         try:
             result = subprocess.run(
-                ["lualatex", "--version"],
+                ["lualatex", "--version"],  # noqa: S607
                 capture_output=True,
                 text=True,
                 timeout=10,
